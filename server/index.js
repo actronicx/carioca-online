@@ -47,6 +47,22 @@ io.on("connection", (socket) => {
     inviaStatoATutti(cod);
   });
 
+  // Un giocatore che aveva già una sessione (salvata nel browser) riprende il proprio posto
+  // dopo una disconnessione, un refresh della pagina o un cambio rete.
+  socket.on("riconnettiStanza", ({ codice, idx }, callback) => {
+    const cod = (codice || "").toUpperCase().trim();
+    const stato = stanze.get(cod);
+    if (!stato) return callback?.({ ok: false, errore: "La stanza non esiste più (il server potrebbe essere stato riavviato)." });
+    if (typeof idx !== "number" || idx < 0 || idx >= stato.numGiocatori) {
+      return callback?.({ ok: false, errore: "Giocatore non valido in questa stanza." });
+    }
+    stato.socketIds[idx] = socket.id;
+    stato.connessi[idx] = true;
+    socket.join(cod);
+    callback?.({ ok: true, codice: cod, idx });
+    inviaStatoATutti(cod);
+  });
+
   socket.on("iniziaPartita", ({ codice, giocatoreInizialeIdx }, callback) => {
     const stato = stanze.get(codice);
     if (!stato) return callback?.({ ok: false, errore: "Stanza non trovata." });
