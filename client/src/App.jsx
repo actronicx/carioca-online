@@ -111,8 +111,41 @@ export default function App() {
   const didDragRef = useRef(false);
   const [draggingId, setDraggingId] = useState(null);
 
+  // Al primo caricamento della pagina, recupera subito una sessione salvata (se c'è)
+  // così l'utente vede la schermata di caricamento invece della home mentre si riconnette.
   useEffect(() => {
-    function onConnect() { setConnesso(true); }
+    const salvato = localStorage.getItem("carioca_sessione");
+    if (salvato) {
+      try {
+        const { codice: cSalvato, idx } = JSON.parse(salvato);
+        if (cSalvato && typeof idx === "number") {
+          setCodice(cSalvato);
+          setMioIndice(idx);
+        }
+      } catch (e) { /* sessione salvata corrotta, ignora */ }
+    }
+  }, []);
+
+  useEffect(() => {
+    function tentaRiconnessione() {
+      const salvato = localStorage.getItem("carioca_sessione");
+      if (!salvato) return;
+      try {
+        const { codice: cSalvato, idx } = JSON.parse(salvato);
+        if (!cSalvato || typeof idx !== "number") return;
+        socket.emit("riconnettiStanza", { codice: cSalvato, idx }, (risultato) => {
+          if (!risultato?.ok) {
+            // La stanza non esiste più (es. server riavviato): torna alla home
+            localStorage.removeItem("carioca_sessione");
+            setCodice(null);
+            setMioIndice(null);
+            setStato(null);
+            setErroreHome(risultato?.errore || "Sessione scaduta: crea o unisciti a una nuova stanza.");
+          }
+        });
+      } catch (e) { /* ignora */ }
+    }
+    function onConnect() { setConnesso(true); tentaRiconnessione(); }
     function onDisconnect() { setConnesso(false); }
     function onStato(nuovoStato) {
       setStato(nuovoStato);
@@ -121,6 +154,7 @@ export default function App() {
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("statoAggiornato", onStato);
+    if (socket.connected) tentaRiconnessione(); // la socket era già connessa quando il componente è montato
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
@@ -153,6 +187,7 @@ export default function App() {
       if (!risultato.ok) { setErroreHome(risultato.errore || "Errore."); return; }
       setCodice(risultato.codice);
       setMioIndice(risultato.idx);
+      localStorage.setItem("carioca_sessione", JSON.stringify({ codice: risultato.codice, idx: risultato.idx }));
     });
   }
 
@@ -163,6 +198,7 @@ export default function App() {
       if (!risultato.ok) { setErroreHome(risultato.errore || "Errore."); return; }
       setCodice(risultato.codice);
       setMioIndice(risultato.idx);
+      localStorage.setItem("carioca_sessione", JSON.stringify({ codice: risultato.codice, idx: risultato.idx }));
     });
   }
 
@@ -388,6 +424,17 @@ export default function App() {
               ))}
             </tbody>
           </table>
+          <button
+            onClick={() => {
+              localStorage.removeItem("carioca_sessione");
+              setCodice(null);
+              setMioIndice(null);
+              setStato(null);
+            }}
+            style={{ ...styles.startBtn, marginTop: 24 }}
+          >
+            Nuova partita
+          </button>
         </div>
       </div>
     );
