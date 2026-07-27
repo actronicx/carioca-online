@@ -17,6 +17,7 @@ const MANI = [
   { id: 7, nome: "Chiusura", desc: "Nessuna discesa parziale: si vince chiudendo tutta la mano in un colpo solo con tris, poker o scale da 3+ carte (stesso seme), senza jolly", richiesta: [{ tipo: "chiusura" }] },
   { id: 8, nome: "Bomba", desc: "Poker (semi diversi) + scala da 5 dello stesso seme. Non si possono scartare né attaccare 5 e 10 finché non sono scesi tutti i giocatori (a meno che restino solo 5/10 in mano, per lo scarto)", richiesta: [{ tipo: "pokerSemiDiversi" }, { tipo: "scalaReale5" }], valoriVietati: ["5", "10"] },
   { id: 9, nome: "Trik Trak", desc: "Coppia vestita + tris (semi diversi) + scala da 3+ carte stesso seme. Non si possono scartare né attaccare J/Q/K/A finché non sono scesi tutti i giocatori (a meno che restino solo J/Q/K/A in mano, per lo scarto)", richiesta: [{ tipo: "coppiaVestita" }, { tipo: "trisEsatto" }, { tipo: "scalaMin3" }], valoriVietati: ["J", "Q", "K", "A"] },
+  { id: 10, nome: "Scala 40", desc: "Per scendere servono tris, poker o scale (3+ carte, niente coppie o full) che insieme totalizzano almeno 40 punti. Il jolly vale come la carta che sostituisce. L'Asso vale 1 punto in scala prima del 2, altrimenti 11 punti (in tris/poker o in scala dopo il Re); le figure valgono 10, le numeriche il loro valore.", richiesta: [{ tipo: "scala40" }] },
 ];
 
 // ============ MAZZO ============
@@ -69,6 +70,8 @@ function isGruppoStessoValore(carte, { lunghezzaEsatta, valoriAmmessi, semiDiver
   return true;
 }
 
+// Valida una scala. Prova prima l'asso come carta bassa (prima del 2); se fallisce e la scala
+// contiene davvero un asso, riprova considerandolo carta alta (dopo il Re) — es. Q-K-A.
 function isScalaColore(carte, { min = 3, exact = null, permettiJolly = true } = {}) {
   if (exact !== null && carte.length !== exact) return false;
   if (carte.length < min) return false;
@@ -78,16 +81,26 @@ function isScalaColore(carte, { min = 3, exact = null, permettiJolly = true } = 
   if (nonJolly.length === 0) return false;
   const seme = nonJolly[0].seme;
   if (!nonJolly.every((c) => c.seme === seme)) return false;
-  const numeri = nonJolly.map((c) => VALORE_NUM[c.valore]).sort((a, b) => a - b);
-  for (let i = 1; i < numeri.length; i++) if (numeri[i] === numeri[i - 1]) return false;
-  const minNum = numeri[0];
-  const maxNum = numeri[numeri.length - 1];
-  const spanNaturale = maxNum - minNum + 1;
-  const buchi = spanNaturale - numeri.length;
-  if (buchi > jollyCount) return false;
-  const jollyResidui = jollyCount - buchi;
-  const spanTotale = spanNaturale + jollyResidui;
-  return spanTotale === carte.length && spanTotale <= 13;
+
+  function provaConAssoAlto(assoAlto) {
+    const numeri = nonJolly
+      .map((c) => (c.valore === "A" && assoAlto ? 14 : VALORE_NUM[c.valore]))
+      .sort((a, b) => a - b);
+    for (let i = 1; i < numeri.length; i++) if (numeri[i] === numeri[i - 1]) return false;
+    const minNum = numeri[0];
+    const maxNum = numeri[numeri.length - 1];
+    const spanNaturale = maxNum - minNum + 1;
+    const buchi = spanNaturale - numeri.length;
+    if (buchi > jollyCount) return false;
+    const jollyResidui = jollyCount - buchi;
+    const spanTotale = spanNaturale + jollyResidui;
+    return spanTotale === carte.length && maxNum + jollyResidui <= 14;
+  }
+
+  if (provaConAssoAlto(false)) return true;
+  const haAsso = nonJolly.some((c) => c.valore === "A");
+  if (haAsso && provaConAssoAlto(true)) return true;
+  return false;
 }
 
 function isCoppiaVestita(carte, permettiJolly = true) {
@@ -115,6 +128,70 @@ function isGruppoChiusuraValido(carte) {
   return false;
 }
 
+// ============ SCALA 40 ============
+// Punteggio di un tris/poker per la Scala 40: l'Asso vale 11, le figure 10, le altre il valore nominale.
+function calcolaPuntiGruppoValoreScala40(carte) {
+  const nonJolly = carte.filter((c) => !c.jolly);
+  if (nonJolly.length === 0) return null;
+  const valore = nonJolly[0].valore;
+  const puntiUnitari = valore === "A" ? 11 : ["J", "Q", "K"].includes(valore) ? 10 : parseInt(valore, 10);
+  return puntiUnitari * carte.length;
+}
+
+// Punteggio di una scala per la Scala 40: prova sia l'asso basso (vale 1) sia l'asso alto (vale 11),
+// e sceglie l'interpretazione che dà più punti (quella che il giocatore intendeva giocare).
+function calcolaPuntiScalaScala40(carte) {
+  const nonJolly = carte.filter((c) => !c.jolly);
+  const jollyCount = carte.length - nonJolly.length;
+  if (nonJolly.length === 0) return null;
+
+  function calcolaConAssoAlto(assoAlto) {
+    const numeri = nonJolly
+      .map((c) => (c.valore === "A" && assoAlto ? 14 : VALORE_NUM[c.valore]))
+      .sort((a, b) => a - b);
+    for (let i = 1; i < numeri.length; i++) if (numeri[i] === numeri[i - 1]) return null;
+    const minNum = numeri[0];
+    const maxNum = numeri[numeri.length - 1];
+    const spanNaturale = maxNum - minNum + 1;
+    const buchi = spanNaturale - numeri.length;
+    if (buchi > jollyCount) return null;
+    const jollyResidui = jollyCount - buchi;
+    const spanTotale = spanNaturale + jollyResidui;
+    if (spanTotale !== carte.length) return null;
+    const nuovoMax = maxNum + jollyResidui;
+    if (nuovoMax > 14) return null;
+    let punti = 0;
+    for (let n = minNum; n <= nuovoMax; n++) {
+      if (n === 1) punti += 1; // asso prima del 2
+      else if (n === 14) punti += 11; // asso dopo il re
+      else if (n >= 11 && n <= 13) punti += 10; // J, Q, K
+      else punti += n; // 2-10
+    }
+    return punti;
+  }
+
+  const risultatoBasso = calcolaConAssoAlto(false);
+  const haAsso = nonJolly.some((c) => c.valore === "A");
+  const risultatoAlto = haAsso ? calcolaConAssoAlto(true) : null;
+  if (risultatoBasso === null && risultatoAlto === null) return null;
+  if (risultatoBasso === null) return risultatoAlto;
+  if (risultatoAlto === null) return risultatoBasso;
+  return Math.max(risultatoBasso, risultatoAlto);
+}
+
+// Valida un singolo gruppo per la Scala 40 (tris, poker o scala — mai coppie o full) e ne calcola i punti.
+// Ritorna null se il gruppo non è un tris/poker/scala valido.
+function validaEPuntiGruppoScala40(carte) {
+  if (carte.length < 3) return null;
+  if (carte.length <= 4 && isGruppoStessoValore(carte, { semiDiversi: true, permettiJolly: true })) {
+    return { valido: true, punti: calcolaPuntiGruppoValoreScala40(carte), tipo: carte.length === 4 ? "pokerLibero" : "trisLibero" };
+  }
+  if (isScalaColore(carte, { min: 3, permettiJolly: true })) {
+    return { valido: true, punti: calcolaPuntiScalaScala40(carte), tipo: "scalaLibera" };
+  }
+  return null;
+}
+
 function nomeRichiesta(r) {
   switch (r.tipo) {
     case "coppiaVestita": return "Coppia Vestita (J/Q/K/A)";
@@ -124,6 +201,7 @@ function nomeRichiesta(r) {
     case "pokerSemiDiversi": return "Poker (semi diversi)";
     case "scalaReale5": return "Scala Reale (5 carte)";
     case "scalaMin3": return "Scala (3+ carte)";
+    case "scala40": return "Scala 40 (min. 40 punti)";
     default: return r.tipo;
   }
 }
@@ -144,4 +222,5 @@ module.exports = {
   creaMazzo, mescola, puntiCarta,
   isGruppoStessoValore, isScalaColore, isCoppiaVestita, isCoppiaNonVestita, isCoppiaEsatta,
   isTrisEsatto, isPokerSemiDiversi, isScalaReale5, isGruppoChiusuraValido, nomeRichiesta, validaGruppo,
+  calcolaPuntiGruppoValoreScala40, calcolaPuntiScalaScala40, validaEPuntiGruppoScala40,
 };

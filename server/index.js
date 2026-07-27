@@ -96,6 +96,9 @@ io.on("connection", (socket) => {
       case "confermaScendi":
         risultato = RoomLogic.confermaScendi(stato, idx, payload.gruppiIds);
         break;
+      case "confermaScendiScala40":
+        risultato = RoomLogic.confermaScendiScala40(stato, idx, payload.gruppiIds);
+        break;
       case "confermaScendiLibero":
         risultato = RoomLogic.confermaScendiLibero(stato, idx, payload.tipo, payload.ids);
         break;

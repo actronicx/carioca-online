@@ -1,6 +1,6 @@
 const {
   MANI, creaMazzo, mescola, puntiCarta, isGruppoStessoValore, isScalaColore,
-  isGruppoChiusuraValido, validaGruppo, NUM_CARTE_MANO, nomeRichiesta,
+  isGruppoChiusuraValido, validaGruppo, NUM_CARTE_MANO, nomeRichiesta, validaEPuntiGruppoScala40,
 } = require("./gameEngine");
 
 function generaCodice() {
@@ -222,6 +222,44 @@ function confermaScendi(stato, idx, gruppiIds) {
   return { ok: true };
 }
 
+// La Scala 40 ha una discesa "libera": il giocatore compone quanti gruppi vuole
+// (tris, poker o scale da 3+ carte, mai coppie/full) finché insieme totalizzano almeno 40 punti.
+function confermaScendiScala40(stato, idx, gruppiIds) {
+  if (idx !== stato.turno) return { ok: false, errore: "Non è il tuo turno." };
+  if (stato.sceso[idx]) return { ok: false, errore: "Sei già sceso in questa mano." };
+  if (!gruppiIds || gruppiIds.length === 0) return { ok: false, errore: "Devi comporre almeno un gruppo (tris, poker o scala)." };
+
+  const manoGiocatore = stato.mani[idx];
+  const gruppiCarte = gruppiIds.map((ids) => ids.map((id) => manoGiocatore.find((c) => c.id === id)).filter(Boolean));
+
+  let totalePunti = 0;
+  const risultatiGruppi = [];
+  for (let i = 0; i < gruppiCarte.length; i++) {
+    const esito = validaEPuntiGruppoScala40(gruppiCarte[i]);
+    if (!esito) {
+      return { ok: false, errore: `Il gruppo ${i + 1} non è un tris, un poker o una scala validi (niente coppie o full nella Scala 40).` };
+    }
+    totalePunti += esito.punti;
+    risultatiGruppi.push({ tipo: esito.tipo, carte: gruppiCarte[i] });
+  }
+
+  if (totalePunti < 40) {
+    return { ok: false, errore: `Servono almeno 40 punti per scendere: questi gruppi ne valgono solo ${totalePunti}.` };
+  }
+
+  const idsUsati = new Set(gruppiIds.flat());
+  const nuovaMano = manoGiocatore.filter((c) => !idsUsati.has(c.id));
+  stato.mani[idx] = nuovaMano;
+  stato.combinazioniScese[idx] = risultatiGruppi;
+  stato.sceso[idx] = true;
+  stato.messaggio = `${stato.nomi[idx]} è sceso con ${totalePunti} punti! Ora può scartare o attaccare carte alle combinazioni.`;
+
+  if (nuovaMano.length === 0) {
+    finalizzaMano(stato, idx);
+  }
+  return { ok: true };
+}
+
 function confermaScendiLibero(stato, idx, tipo, ids) {
   if (idx !== stato.turno) return { ok: false, errore: "Non è il tuo turno." };
   if (!stato.sceso[idx]) return { ok: false, errore: "Devi prima scendere la combinazione richiesta." };
@@ -354,6 +392,6 @@ function serializzaPerGiocatore(stato, idx) {
 
 module.exports = {
   nuovaStanza, entraStanza, iniziaPartita, sceltaMano, pescaDalMazzo, pescaDalPozzo,
-  scarta, confermaScendi, confermaScendiLibero, attaccaCarte, confermaChiusura, prossimaMano,
+  scarta, confermaScendi, confermaScendiScala40, confermaScendiLibero, attaccaCarte, confermaChiusura, prossimaMano,
   serializzaPerGiocatore,
 };
